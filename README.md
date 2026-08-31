@@ -148,6 +148,11 @@ click at before a policy exists, so it begins training the moment you launch it:
    `test deliveries` — the real task — lags well behind it. Stopping on the
    first would hand you a policy that looks trained and then misses half the
    cells you click. Picking the right thing to measure is the whole lesson.
+The window sizes itself to your screen and scrolls if it does not fit — mouse
+wheel, Shift+wheel sideways, PgUp/PgDn/Home/End. On a small screen the map and
+the V(s) panel stack rather than sitting side by side; `--map-px` overrides the
+map size if you want it bigger or smaller than the automatic choice.
+
 2. **READY** — training has stopped. **Click any cell** and the trained policy
    drives from S to it, with a running delivered-N-of-M tally. Nothing is
    learned in this phase, so you are watching the finished policy rather than

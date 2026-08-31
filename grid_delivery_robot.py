@@ -155,6 +155,11 @@ HOW THE GUI IS MEANT TO BE USED
           what you are watching is the finished policy rather than one that is
           quietly still improving. "Train more" goes back to phase 1.
 
+    The window sizes itself to your screen and SCROLLS (wheel, Shift+wheel for
+    sideways, PgUp/PgDn/Home/End) if the layout does not fit. On a small screen
+    the map and the V(s) panel stack instead of sitting side by side, and the
+    map shrinks -- pass --map-px to override it.
+
 WHAT YOU SEE IN THE GUI
     left   the map. Grey = wall, red = hazard, green = start, red ring = goal.
            An episode replays live on top.
@@ -855,9 +860,6 @@ def run_gui(args):
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
     N = args.grid
-    SC = max(1, int(640 / N))                 # cell size in pixels
-    CW = CH = N * SC
-
     C_FREE, C_WALL, C_HAZ = "#ffffff", "#4a4a55", "#f0a9a4"
     BG = "#f4f4f6"
 
@@ -865,6 +867,25 @@ def run_gui(args):
     root.title(f"Grid delivery robot — {N}x{N}, stochastic, goal-conditioned "
                f"(REINFORCE + GAE)")
     root.configure(bg=BG)
+
+    # ------------------------------------------------------- fit to the screen
+    # The full layout is ~1600x1030. That is taller than a 1080p laptop screen
+    # once the window bar and taskbar are taken out, so the bottom plots were
+    # simply cut off with no way to reach them. Everything below therefore sizes
+    # itself against the actual screen, and the whole window scrolls.
+    SW = root.winfo_screenwidth()
+    SH = root.winfo_screenheight()
+    map_px = args.map_px or int(min(620, SH * 0.52))
+    SC = max(1, int(map_px / N))              # cell size in pixels
+    CW = CH = N * SC
+    # matplotlib figure sizes are in inches at 100 dpi, i.e. hundreds of pixels.
+    fig_w = max(4.0, min(5.6, (SW - CW - 120) / 100.0))
+    fig_h = max(3.0, CH / 100.0 - 0.6)
+    strip_w = max(7.0, min(13.5, (SW - 110) / 100.0))
+    strip_h = max(1.9, min(2.6, SH / 420.0))
+    # On a narrow screen the map and the V(s) panel will not fit side by side,
+    # so stack them instead of forcing a horizontal scroll for normal use.
+    narrow = (CW + int(fig_w * 100) + 90) > (SW - 40)
 
     env = GridDeliveryEnv(n=N, n_walls=args.walls, n_hazards=args.hazards,
                           block=args.block, seed=args.seed, max_steps=args.steps)
@@ -900,11 +921,74 @@ def run_gui(args):
                             max_steps=args.steps)}
 
     # ---------------------------------------------------------------- layout
-    top = tk.Frame(root, bg=BG); top.pack(side="top", fill="both", expand=True)
-    left = tk.Frame(top, bg=BG); left.pack(side="left", padx=10, pady=10)
-    phase_lbl = tk.Label(left, text="", bg=BG, anchor="w", justify="left",
+    # A Tk window does not scroll on its own: you scroll a Canvas, and put the
+    # real layout inside it as a single embedded window. `content` is what every
+    # widget below is packed into; `scroller` is the viewport onto it.
+    shell = tk.Frame(root, bg=BG); shell.pack(fill="both", expand=True)
+    scroller = tk.Canvas(shell, bg=BG, highlightthickness=0)
+    vbar = tk.Scrollbar(shell, orient="vertical", command=scroller.yview)
+    hbar = tk.Scrollbar(shell, orient="horizontal", command=scroller.xview)
+    scroller.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+    # grid, not pack: with pack, the expanding canvas claims the space first and
+    # a later-packed horizontal bar gets squeezed into the leftover corner.
+    scroller.grid(row=0, column=0, sticky="nsew")
+    vbar.grid(row=0, column=1, sticky="ns")
+    hbar.grid(row=1, column=0, sticky="ew")
+    shell.rowconfigure(0, weight=1)
+    shell.columnconfigure(0, weight=1)
+    content = tk.Frame(scroller, bg=BG)
+    scroller.create_window((0, 0), window=content, anchor="nw")
+
+    def _resize(_=None):
+        # The scrollable area is exactly as big as the content wants to be, and
+        # each scrollbar appears only when there is something to scroll to.
+        box = scroller.bbox("all")
+        if box is None:
+            return
+        scroller.configure(scrollregion=box)
+        need_v = box[3] - box[1] > scroller.winfo_height() + 2
+        need_h = box[2] - box[0] > scroller.winfo_width() + 2
+        (vbar.grid if need_v else vbar.grid_remove)()
+        (hbar.grid if need_h else hbar.grid_remove)()
+    content.bind("<Configure>", _resize)
+    scroller.bind("<Configure>", _resize)
+
+    def _wheel(ev):
+        # X11 sends wheel as Button-4/5; Windows and macOS send <MouseWheel>
+        # with a delta. Handle both so this scrolls wherever it is run.
+        if ev.num == 4 or getattr(ev, "delta", 0) > 0:
+            scroller.yview_scroll(-3, "units")
+        elif ev.num == 5 or getattr(ev, "delta", 0) < 0:
+            scroller.yview_scroll(3, "units")
+
+    def _shift_wheel(ev):
+        if ev.num == 4 or getattr(ev, "delta", 0) > 0:
+            scroller.xview_scroll(-3, "units")
+        elif ev.num == 5 or getattr(ev, "delta", 0) < 0:
+            scroller.xview_scroll(3, "units")
+
+    for seq, fn in (("<Button-4>", _wheel), ("<Button-5>", _wheel),
+                    ("<MouseWheel>", _wheel),
+                    ("<Shift-Button-4>", _shift_wheel),
+                    ("<Shift-Button-5>", _shift_wheel),
+                    ("<Shift-MouseWheel>", _shift_wheel)):
+        root.bind_all(seq, fn)
+    root.bind_all("<Prior>", lambda e: scroller.yview_scroll(-1, "pages"))
+    root.bind_all("<Next>", lambda e: scroller.yview_scroll(1, "pages"))
+    root.bind_all("<Home>", lambda e: scroller.yview_moveto(0))
+    root.bind_all("<End>", lambda e: scroller.yview_moveto(1))
+
+    # The banner is a full-width strip of its own. Inside the map column it was
+    # the widest thing there, so the column grew to ~740px around a 400px map
+    # and left a dead gap before the V(s) panel.
+    phase_lbl = tk.Label(content, text="", bg=BG, anchor="w", justify="left",
                          font=("DejaVu Sans", 12, "bold"))
-    phase_lbl.pack(fill="x", pady=(0, 4))
+    phase_lbl.pack(side="top", fill="x", padx=12, pady=(8, 2))
+
+    top = tk.Frame(content, bg=BG); top.pack(side="top", fill="both", expand=True)
+    side = "top" if narrow else "left"
+    left = tk.Frame(top, bg=BG); left.pack(side=side, padx=10, pady=(0, 6),
+                                           anchor="nw")
     canvas = tk.Canvas(left, width=CW, height=CH, bg="#ffffff",
                        highlightthickness=1, highlightbackground="#c9c9d0")
     canvas.pack()
@@ -912,21 +996,28 @@ def run_gui(args):
                         anchor="w", font=("DejaVu Sans", 10))
     goal_lbl.pack(fill="x", pady=(6, 0))
 
-    right = tk.Frame(top, bg=BG); right.pack(side="left", fill="both", expand=True)
-    figv = Figure(figsize=(5.6, 4.6), dpi=100)
+    right = tk.Frame(top, bg=BG); right.pack(side=side, padx=(0, 10), pady=10,
+                                             anchor="nw")
+    figv = Figure(figsize=(fig_w, fig_h), dpi=100)
     axv = figv.add_subplot(111)
     cv = FigureCanvasTkAgg(figv, master=right)
-    cv.get_tk_widget().pack(fill="both", expand=True)
+    # No expand: an expanding canvas inside a scrolled frame just grows to the
+    # widest sibling and leaves a dead gap next to the map.
+    cv.get_tk_widget().pack(anchor="nw")
     stat = tk.Label(right, text="", font=("DejaVu Sans Mono", 10), justify="left",
                     bg=BG, anchor="w")
     stat.pack(fill="x", padx=6)
 
-    figc = Figure(figsize=(13.5, 2.6), dpi=100)
+    figc = Figure(figsize=(strip_w, strip_h), dpi=100)
     ax1 = figc.add_subplot(141); ax2 = figc.add_subplot(142)
     ax3 = figc.add_subplot(143); ax4 = figc.add_subplot(144)
-    cc = FigureCanvasTkAgg(figc, master=root)
+    cc = FigureCanvasTkAgg(figc, master=content)
     cc.get_tk_widget().pack(side="top", fill="both", expand=True, padx=10)
-    ctl = tk.Frame(root, bg=BG); ctl.pack(side="top", fill="x", pady=6)
+    # Two control rows. One row of every button and slider is ~1300px wide and
+    # was the single widest thing in the window, forcing a horizontal scrollbar
+    # on a 1366-wide laptop all by itself.
+    ctl = tk.Frame(content, bg=BG); ctl.pack(side="top", fill="x", pady=(6, 0))
+    ctl2 = tk.Frame(content, bg=BG); ctl2.pack(side="top", fill="x", pady=(2, 6))
 
     # ------------------------------------------------------------ map drawing
     # The map is 16384 cells. Drawing one Tk rectangle per cell makes the canvas
@@ -1003,10 +1094,15 @@ def run_gui(args):
                            fill={"DELIVERED": "#2e9e2e",
                                  "DESTROYED (hazard)": "#d43d3d"}.get(txt, "#444"),
                            text=f"step {i}/{n - 1}   {txt}")
-        canvas.create_text(CW - 6, 11, anchor="e", tags="dyn",
-                           font=("DejaVu Sans Mono", 9), fill="#777",
-                           text=("practice episode" if state["phase"] == "training"
-                                 else "trained policy, greedy"))
+        if CW >= 520:
+            # On a small screen the map is ~380px wide and this label runs into
+            # the step counter on the left. The banner already says which phase
+            # we are in, so drop it rather than overlap.
+            canvas.create_text(CW - 6, 11, anchor="e", tags="dyn",
+                               font=("DejaVu Sans Mono", 9), fill="#777",
+                               text=("practice episode"
+                                     if state["phase"] == "training"
+                                     else "trained policy, greedy"))
 
     def refresh_phase():
         t = trainer["t"]
@@ -1158,9 +1254,14 @@ def run_gui(args):
                 snap["field"] = (rr, ccx, a)
             q.put(snap)
             if done:
+                # Do NOT clear state["traj"] here. This is the worker thread and
+                # animate() runs on the Tk thread: clearing it between that
+                # function's None-check and its next use crashed the GUI with
+                # "'NoneType' object is not subscriptable" exactly when training
+                # finished. The phase flip is enough -- the current replay plays
+                # out, and next_trajectory() then returns a ready-phase episode.
                 state["run"] = False
                 state["phase"] = "ready"
-                state["traj"] = None
             time.sleep(state["throttle"] / 1000.0)
 
     wthread = threading.Thread(target=worker, daemon=True)
@@ -1253,12 +1354,15 @@ def run_gui(args):
         return tr
 
     def animate():
-        if state["traj"] is None:
+        # Read once into a local: other callbacks (and, historically, the worker
+        # thread) can swap state["traj"] out from under a multi-step function.
+        tr = state["traj"]
+        if tr is None:
             state["traj"] = next_trajectory(); state["frame"] = 0
         else:
             draw_frame()
             state["frame"] += 1
-            if state["frame"] >= len(state["traj"]["path"]) + HOLD:
+            if state["frame"] >= len(tr["path"]) + HOLD:
                 state["traj"] = next_trajectory(); state["frame"] = 0
         if not state["quit"]:
             root.after(int(1000 / max(1, state["fps"])), animate)
@@ -1324,19 +1428,21 @@ def run_gui(args):
               font=("DejaVu Sans", 10)).pack(side="left", padx=4)
     tk.Button(ctl, text="New map (fresh weights)", command=reset_map,
               font=("DejaVu Sans", 10)).pack(side="left", padx=4)
-    tk.Checkbutton(ctl, text="greedy", variable=watch_greedy, bg=BG,
-                   font=("DejaVu Sans", 10, "bold")).pack(side="left", padx=8)
-    tk.Checkbutton(ctl, text="V(s) heat", variable=show_heat, bg=BG,
+    tk.Checkbutton(ctl2, text="greedy", variable=watch_greedy, bg=BG,
+                   font=("DejaVu Sans", 10, "bold")).pack(side="left", padx=(8, 4))
+    tk.Checkbutton(ctl2, text="V(s) heat", variable=show_heat, bg=BG,
                    font=("DejaVu Sans", 10)).pack(side="left")
-    tk.Checkbutton(ctl, text="policy arrows", variable=show_arrows, bg=BG,
+    tk.Checkbutton(ctl2, text="policy arrows", variable=show_arrows, bg=BG,
                    font=("DejaVu Sans", 10)).pack(side="left")
-    tk.Label(ctl, text="replay fps", bg=BG, font=("DejaVu Sans", 10)).pack(side="left", padx=(10, 0))
-    sp = tk.Scale(ctl, from_=5, to=120, orient="horizontal", length=150, bg=BG,
+    tk.Label(ctl2, text="replay fps", bg=BG,
+             font=("DejaVu Sans", 10)).pack(side="left", padx=(10, 0))
+    sp = tk.Scale(ctl2, from_=5, to=120, orient="horizontal", length=130, bg=BG,
                   highlightthickness=0,
                   command=lambda v: state.__setitem__("fps", int(float(v))))
     sp.set(args.fps); sp.pack(side="left", padx=4)
-    tk.Label(ctl, text="slow training", bg=BG, font=("DejaVu Sans", 10)).pack(side="left", padx=(10, 0))
-    tk.Scale(ctl, from_=0, to=600, orient="horizontal", length=130, resolution=25,
+    tk.Label(ctl2, text="slow training", bg=BG,
+             font=("DejaVu Sans", 10)).pack(side="left", padx=(10, 0))
+    tk.Scale(ctl2, from_=0, to=600, orient="horizontal", length=110, resolution=25,
              bg=BG, highlightthickness=0,
              command=lambda v: state.__setitem__("throttle", int(float(v)))
              ).pack(side="left", padx=4)
@@ -1354,6 +1460,16 @@ def run_gui(args):
         root.after(50, finish)
 
     root.protocol("WM_DELETE_WINDOW", on_close)
+
+    # Open at the size the layout wants, capped to what the screen can show.
+    # Whatever does not fit is reachable by scrolling rather than lost.
+    root.update_idletasks()
+    _resize()
+    root.geometry("%dx%d+20+20" % (
+        min(content.winfo_reqwidth() + vbar.winfo_reqwidth() + 4, SW - 40),
+        min(content.winfo_reqheight() + hbar.winfo_reqheight() + 4, SH - 90)))
+    root.minsize(560, 400)
+
     draw_static(); draw_markers(); refresh_goal_label()
     # Training starts by itself. There is nothing useful to click at before a
     # policy exists, so making you press a button first was busywork.
@@ -1394,6 +1510,8 @@ if __name__ == "__main__":
     ap.add_argument("--batch-eps", type=int, default=16)
     ap.add_argument("--ent", type=float, default=0.03, help="entropy bonus")
     ap.add_argument("--eval-eps", type=int, default=20)
+    ap.add_argument("--map-px", type=int, default=0,
+                    help="width of the map in pixels; 0 fits it to your screen")
     ap.add_argument("--fps", type=int, default=45)
     ap.add_argument("--throttle", type=int, default=0)
     ap.add_argument("--no-baseline", action="store_true",
