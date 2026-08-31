@@ -174,9 +174,10 @@ Now the four traps the exercise asks about, answered with the numbers above.
   `40c`; the shortcut costs `0.2 × (extra hazard risk) × 10` per risky step from
   slipping. Push `c` to −0.5 and the detour costs 20 — comparable to the +10
   delivery itself, and cutting the corner starts to win. **The safe range is
-  `|R_step| ≪ R_goal / typical_path_length`**, i.e. well under 10/256 ≈ 0.04
-  here. 0.02 sits inside that with a factor of two to spare, which is why it is
-  the number.
+  `|R_step| < R_goal / typical_path_length`**, i.e. under 10/256 ≈ 0.039 here.
+  0.02 is a little under half of that — a 1.95× margin, which is why it is the
+  number. `tests/test_grid_delivery_robot.py` asserts exactly this, so the
+  margin cannot be edited away by accident.
 
 **Why shaping at all?** On 4×4 you do not need it: a random walk hits G in a few
 dozen steps and a sparse +1 is perfectly learnable. On 128×128 a random walk
