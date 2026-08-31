@@ -29,7 +29,8 @@ S . . .          S  start, cell (0, 0)
 
 That is the FrozenLake transition model. The version in this repo is scaled up
 to what you asked for: **128×128**, **10–20 walls**, **10–20 hazards** placed at
-random, a goal you pick by clicking, and a **256-step** budget.
+random, a goal you pick by clicking, and a **512-step** budget (§5 explains
+why not 256).
 
 ### What scaling up actually changed
 
@@ -68,7 +69,7 @@ differ I say so.
 
 ```
 s_t = ( robot_cell, goal_cell, t, wall_map, hazard_map )
-    = ( (row, col) ∈ [0,128)² , (grow, gcol) , t ∈ [0,256] , W , H )
+    = ( (row, col) ∈ [0,128)² , (grow, gcol) , t ∈ [0,512] , W , H )
 ```
 
 Taking the questions in order:
@@ -82,7 +83,7 @@ Taking the questions in order:
   has to act without deadlocking, **yes, something like it** — and I only found
   that out by watching it fail. See §4.3. The implementation carries the
   previous *action*, which is smaller and does the same job.
-* **Do you need the elapsed steps?** **Yes.** Truncation at 256 makes the value
+* **Do you need the elapsed steps?** **Yes.** Truncation at 512 makes the value
   of a state depend on the clock: with 200 steps left, walking around a hazard
   is correct; with 3 steps left, nothing is worth doing. Leave `t` out and the
   value function is being asked to predict two different numbers from one input,
@@ -99,7 +100,7 @@ o_t = [ wall_patch_9×9 , hazard_patch_9×9 ,          # 162 — what is next to
         Δrow/128 , Δcol/128 ,                        #   2 — signed offset to G
         Δrow/‖Δ‖ , Δcol/‖Δ‖ ,                        #   2 — unit direction to G
         manhattan(pos,G)/256 ,                       #   1 — how far
-        1 − t/256 ,                                  #   1 — clock
+        1 − t/512 ,                                  #   1 — clock
         onehot(previous action) ]                    #   4 — one step of memory
                                                      # ─── 334 floats
 ```
@@ -143,17 +144,17 @@ slip model becomes one line instead of a lookup table.
 |---|---|
 | Reach **G** | **+10.00**, and terminate |
 | Enter **H** | **−10.00**, and terminate |
-| Normal step | **−0.02** |
-| Hit wall/boundary | **−0.02 − 0.05 = −0.07** |
+| Normal step | **−0.01** |
+| Hit wall/boundary | **−0.01 − 0.05 = −0.06** |
 | *(shaping)* each cell of Manhattan progress | **+0.10 × (d_prev − d_now)** |
 
 Discount **γ = 0.995**.
 
 Now the four traps the exercise asks about, answered with the numbers above.
 
-* **Could the robot earn more by waiting forever?** No. Every step costs −0.02
+* **Could the robot earn more by waiting forever?** No. Every step costs −0.01
   and there is no action with non-negative reward, so the value of dithering for
-  256 steps is −5.12 against +10 for delivering. Standing still is strictly
+  512 steps is −5.12 against +10 for delivering. Standing still is strictly
   dominated. This is exactly why the step penalty must be *negative* rather than
   zero: at zero, "never risk the hazard, just idle" ties with success under any
   discount, and a risk-averse policy will take the tie.
@@ -165,8 +166,8 @@ Now the four traps the exercise asks about, answered with the numbers above.
   the hazards you actually care about.** A reward-design bug like this does not
   look like a reward-design bug from outside; it looks like a stupid agent.
 * **Will a step penalty encourage the shortest safe route?** Yes, and the
-  shaping term does most of that work — `−0.02` alone is a weak preference over
-  256 steps (5.12 total, half a delivery). Its real job is breaking ties between
+  shaping term does most of that work — `−0.01` alone is a weak preference over
+  512 steps (5.12 total, half a delivery). Its real job is breaking ties between
   equally-short routes and killing idling.
 * **Could an excessively large step penalty encourage dangerous shortcuts?**
   Yes, and this is the sharp edge. Suppose the safe route is 40 cells longer
@@ -174,9 +175,10 @@ Now the four traps the exercise asks about, answered with the numbers above.
   `40c`; the shortcut costs `0.2 × (extra hazard risk) × 10` per risky step from
   slipping. Push `c` to −0.5 and the detour costs 20 — comparable to the +10
   delivery itself, and cutting the corner starts to win. **The safe range is
-  `|R_step| < R_goal / typical_path_length`**, i.e. under 10/256 ≈ 0.039 here.
-  0.02 is a little under half of that — a 1.95× margin, which is why it is the
-  number. `tests/test_grid_delivery_robot.py` asserts exactly this, so the
+  `|R_step| < R_goal / typical_path_length`**, i.e. under 10/512 ≈ 0.0195 here.
+  0.01 is a little under half of that — a 1.95× margin, which is why it is the
+  number. Note the bound **moves with the horizon**: doubling the step budget
+  from 256 to 512 halved it, so the step penalty had to halve with it. `tests/test_grid_delivery_robot.py` asserts exactly this, so the
   margin cannot be edited away by accident.
 
 **Why shaping at all?** On 4×4 you do not need it: a random walk hits G in a few
@@ -194,7 +196,7 @@ step back pays.
 terminated = True   iff  robot_cell == G          (success)
                     or   hazard[robot_cell]        (failure — the robot is lost)
 
-truncated  = True   iff  t >= 256   and not terminated
+truncated  = True   iff  t >= 512   and not terminated
 ```
 
 They are tracked separately because **they mean different things to the value
@@ -235,7 +237,7 @@ policy arrows.
 
 **The consequence that matters more:** a 254-cell route does not take 254 steps.
 20% of moves go sideways, so it takes roughly `254 / 0.8 ≈ 318` — **more than
-the 256-step budget**. See §5.
+the 256 steps the exercise suggests**, which is why the default is 512. See §5.
 
 ---
 
@@ -261,7 +263,7 @@ context, and neither is sufficient alone.
 
 ### 2.2 The clock has to be in there
 
-Covered above, but the symptom is worth naming: without `1 − t/256` the value
+Covered above, but the symptom is worth naming: without `1 − t/512` the value
 net's predictions for a state early and late in an episode are forced to be the
 same number, the GAE residuals stay large no matter how long you train, and the
 advantage estimates stay noisy. It looks like a learning-rate problem.
@@ -302,8 +304,8 @@ plus two things the longer horizon forced.
 ### 3.1 GAE instead of the raw return
 
 The car file weights `∇log π` by the Monte-Carlo return minus a baseline. That
-is unbiased, but its variance grows with episode length, and episodes here are
-256 steps rather than 60. So this file uses **GAE(λ=0.95)**:
+is unbiased, but its variance grows with episode length, and episodes here run
+to 512 steps rather than 60. So this file uses **GAE(λ=0.95)**:
 
 ```
 δ_t = r_t + γ V(s_{t+1}) − V(s_t)          one-step TD error
@@ -317,14 +319,14 @@ is what makes it train at all rather than a nicety.
 ### 3.2 A curriculum, or nothing happens
 
 Sampling a goal uniformly on a 128×128 map means the average goal is ~85 cells
-away, which early on means 256 steps of noise and no arrival. So training
+away, which early on means hundreds of steps of noise and no arrival. So training
 samples a **random start and a goal within a radius that grows**, and shortens
 the episode budget to match:
 
 ```
 radius starts at 10
 if mean success over the last 10 updates > 0.80:   radius ×= 1.10   (cap 256)
-episode budget = clamp(4 × radius + 30, 30, 256)
+episode budget = clamp(4 × radius + 30, 30, 512)
 ```
 
 Two details that are the difference between working and not:
@@ -335,12 +337,39 @@ Two details that are the difference between working and not:
   updates on essentially no skill, and the robot then trained forever on goals
   it could not yet reach. Success flatlined at 0.5.
 * **Shrink the episode budget with the radius.** While goals are 10 cells away
-  there is no reason to simulate 256 steps of wandering. It is a 5× speedup for
+  there is no reason to simulate 512 steps of wandering. It is a 5× speedup for
   free, early on, when it matters most.
 
 **The clicked goal is never trained on.** Training runs on curriculum goals you
-never see; the episode replaying in the GUI runs from S to *your* goal. So what
-you are watching is a genuine generalisation test, not a rehearsal.
+never see; when the GUI reaches its ready phase and you click, the episode runs
+from S to *your* goal. So what you are watching is a genuine generalisation
+test, not a rehearsal.
+
+### 3.2b When to stop training — and why the obvious signal is the wrong one
+
+The GUI trains itself and then hands you the policy, so something has to decide
+when it is done. The obvious candidate is the training success rate, and it is
+**wrong**: it is measured on curriculum goals (a random start, a goal sampled
+near it), and it passes 0.90 by update ~120 — long before the robot can cross
+the map from the depot. Stop on it and you hand over a policy that looks trained
+and then misses half the cells you click.
+
+So the stopping rule measures the actual task instead: every 25 updates, once
+the curriculum has reached the far end of the map, run **16 greedy deliveries
+from S to random reachable cells** and stop when `--target-success` of them
+arrive (default 0.85) **twice in a row**.
+
+The "twice in a row" is not defensive padding, it is a bug fix. The first
+version used a single 8-episode check, and it fired at **update 117** on a
+policy that then delivered 3 of 6 to a 165-step goal. Seven-of-eight comes up
+often enough by chance when the true rate is ~0.7, and a noisy test that stops
+training early is worse than no test — it hands over a bad policy *with
+confidence*. Sixteen episodes passing twice is a far harder coincidence and
+costs about two seconds.
+
+The banner shows both numbers, `practice` and `test deliveries`, and watching
+them diverge is the clearest demonstration in this repo of why *what* you
+measure matters more than how carefully you measure it.
 
 ### 3.3 Hyperparameters, and one that mattered a lot
 
@@ -378,92 +407,101 @@ Reward curves hide this failure; that one number does not.
 ## 4. Results
 
 Measured on the default map (seed 0, 16 wall blocks / 746 cells, 14 hazard
-blocks / 578 cells), 800 updates ≈ 12,800 episodes, about 7 minutes on a CPU.
+blocks / 578 cells), 800 updates ≈ 12,800 episodes, 427 s on a CPU.
 
 Reproduce with:
 
 ```bash
-.venv/bin/python grid_delivery_robot.py --headless --updates 800 --goal 100,110
+.venv/bin/python grid_delivery_robot.py --headless --updates 800 --goal 127,127
 ```
 
-Final training batch: **94% success, 0% hazard deaths**, curriculum radius at
-the cap.
+Final training batch: **94% success on curriculum goals, 0% hazard deaths**,
+curriculum radius at the cap.
 
 Generalisation to 20 random goals per band that the policy was **never trained
-on** (3 episodes each, greedy):
+on** (3 episodes each, greedy, from the depot at S):
 
 | optimal route | delivered | steps taken vs optimal |
 |---|---|---|
-| 1–30 cells | **59/60** | 1.73× |
-| 30–80 cells | **57/60** | 1.31× |
-| 80–150 cells | **41/60** | 1.29× |
-| 150–256 cells | **36/60** | 1.24× |
+| 1–30 cells | **60/60** | 1.41× |
+| 30–80 cells | **60/60** | 1.31× |
+| 80–150 cells | **44/60** | 1.33× |
+| 150–256 cells | **49/60** | 1.31× |
 
-Two things in that table are worth stopping on.
+Three things in that table are worth stopping on.
 
 **The ≈1.3× ratio is not a flaw — it is close to the floor.** With 20% of moves
 going sideways, *no* policy can average much better than `1/0.8 = 1.25×` the
 shortest path. The robot is running within a few percent of the physical limit
-of the transition model, and the ratio *improves* with distance (1.24× on the
-longest routes) because the overhead amortises.
+of the transition model, and it holds that ratio at every distance.
 
-**The short-route ratio is the worst one (1.73×), and that is not a mistake
+**The short-route ratio is the worst one (1.41×), and that is not a mistake
 either.** A 6-cell route with one unlucky slip is 8 steps — a 33% overhead that
-no amount of skill removes. Percentages are unkind to small denominators. Look
-at the delivery rate for short goals instead: 59/60.
+no amount of skill removes. Percentages are unkind to small denominators; the
+delivery rate for short goals is 60/60.
 
-**The falling delivery rate with distance is the step budget, not the policy.**
-The 150–256 band contains routes that need more than 256 steps in expectation
-(§5). Those 24 failures are timeouts, not hazard deaths — the robot was walking
-the right way when the stopwatch stopped it.
+**Raising the budget from 256 to 512 is what fixed the long routes.** The same
+training run at 256 steps delivered only 36/60 in the 150–256 band; at 512 it is
+49/60. Those failures were never a policy problem — the routes needed more steps
+than existed. §5 has the arithmetic.
 
-The headline eval in that run makes the point precisely. Goal (100,110),
-optimal 210 steps:
+The worst case on this map is the exact far corner, and the doc should say so:
 
 ```
-goal (100, 110)   optimal 210, slipping needs ~273, budget 256
-                  << tight: slipping alone may run out the clock
-
-greedy eval to (100, 110): 4/20 delivered, 0 destroyed, 16 timed out,
-                           mean 249 steps vs 210 optimal (1.19x)
+goal (127, 127)   optimal 254 steps, budget 512
+greedy eval: 2/20 delivered, 0 destroyed, 18 timed out,
+             mean 510 steps vs 254 optimal (2.01x)
 ```
 
-The feasibility line **predicted that failure before training started**, and the
-1.19× ratio confirms the diagnosis: on the runs it finished, the robot was
-walking well. It simply needed ~273 steps and had 256. Zero hazard deaths across
-all 20 episodes — it had learned the hazards perfectly. Give it `--steps 400`
-and this goal is comfortable.
+2/20 — far below the 49/60 its distance band manages. A corner is the hardest
+goal on the board: walls on two sides, so every slip near it is a wasted step
+with no way to overshoot and come back cheaply, and 254 is the longest route the
+map contains. **Zero hazard deaths in all 20 runs**, though — it had learned the
+hazards perfectly and simply ran out of clock. `--steps 700` delivers it.
 
----
+## 5. Why the budget is 512 and not 256
 
-## 5. The 256-step budget, honestly
-
-You asked for 256 steps and left the door open ("or more, im not sure"). Here is
-the arithmetic, because it decides what is achievable:
+You suggested 256 steps and left the door open ("or more, im not sure"). It has
+to be more, and here is the arithmetic that decides it:
 
 * the far corner (127,127) is **254 cells** from S by the shortest wall-avoiding
   route;
-* slipping inflates any route by **≈1.25–1.3×**;
-* so that corner needs **≈320 steps in expectation** — and it has 256.
+* slipping inflates any route by **≈1.25–1.3×** — 20% of moves go sideways;
+* so that corner needs **≈330 steps in expectation**.
 
-**No policy can reliably deliver to the far corner in 256 steps.** It is not a
-training failure; it is the budget. The GUI tells you this before you blame the
-robot: every goal you click is labelled
+**At 256, no policy can reliably reach the far third of the map.** Not a
+training failure — arithmetic. And since the whole point of this file is "click
+anywhere and the robot goes there", a budget that makes a third of the map
+unreachable by construction quietly breaks the promise. So **the default is
+512**, which clears 330 with room for a bad run.
 
-* green — `optimal 82 steps, budget 256` — comfortable,
-* orange — `TIGHT — optimal 254, slipping needs ~330, budget 256`,
+Raising the horizon is not free, and it changed one other number. The step
+penalty obeys `|R_step| < R_goal / horizon` (§1) — below that bound, walking the
+long way round a hazard still pays. Doubling the horizon halves the bound, from
+`10/256 = 0.039` to `10/512 = 0.0195`, so `R_STEP` had to come down from −0.02
+to **−0.01** to keep the same ~2× margin. `tests/test_grid_delivery_robot.py`
+asserts that relationship, so the two constants cannot drift apart unnoticed.
+
+The GUI still tells you where you stand before you blame the robot — every goal
+you click is labelled:
+
+* green — `optimal 120 steps, budget 512` — comfortable,
+* orange — `TIGHT — optimal 254, slipping needs ~330, budget 256` — which at
+  the default 512 you will not see on this map at all, since the longest route
+  it contains is 254; drop to `--steps 256` and the far third turns orange,
 * red — `UNREACHABLE — that cell is a wall`.
 
 Practical guidance:
 
 | you want | use |
 |---|---|
-| goals anywhere on the map to be reachable | `--steps 400` |
-| the exercise as specified | `--steps 256` (the default) |
-| faster training, near goals only | `--steps 150` |
+| every cell on the map reachable | `--steps 512` (the default) |
+| the exercise exactly as literally stated | `--steps 256`, and expect the far corner to time out |
+| faster training, near goals only | `--steps 200` |
 
 `--steps` changes the observation (the clock is normalised by it) and the
 truncation bootstrap, so it is a genuine part of the MDP, not a display setting.
+Change it and you are training a different agent.
 
 ---
 

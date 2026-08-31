@@ -197,11 +197,14 @@ def test_walled_goal_is_reported_unreachable(env):
     assert env.bfs_distance(goal)[g.START] == np.iinfo(np.int32).max
 
 
-def test_far_corner_is_flagged_tight(env):
-    """254 cells needs ~330 steps with slipping; 256 is not enough."""
-    f = g.feasibility(env, (127, 127), max_steps=256)
-    assert f["ok"] and f["tight"]
-    assert g.feasibility(env, (127, 127), max_steps=400)["tight"] is False
+def test_far_corner_needs_more_than_256_steps(env):
+    """254 cells needs ~330 steps with slipping, which is why the budget is 512.
+
+    This is the arithmetic behind MAX_STEPS: at 256 the far third of the map is
+    unreachable no matter how good the policy is.
+    """
+    assert g.feasibility(env, (127, 127), max_steps=256)["tight"] is True
+    assert g.feasibility(env, (127, 127), max_steps=g.MAX_STEPS)["tight"] is False
 
 
 def test_set_goal_refuses_walls(env):

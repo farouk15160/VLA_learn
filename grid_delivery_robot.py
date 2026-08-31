@@ -50,7 +50,7 @@ THE PROBLEM, STATED AS AN MDP
          - The goal enters as a RELATIVE offset, never as an absolute cell. "The
            parcel is 40 cells north of me" is directly actionable; "the parcel is
            at (12, 96)" requires the robot to also know where it is standing.
-         - Steps remaining IS included, and it has to be. Truncation at 256 steps
+         - Steps remaining IS included, and it has to be. Truncation at 512 steps
            makes the task non-stationary: with 200 steps left a detour around a
            hazard is correct, with 3 steps left nothing is worth doing. A value
            function cannot be right about both unless it is told the clock.
@@ -89,7 +89,7 @@ THE PROBLEM, STATED AS AN MDP
     R  REWARD .................. per step:
          +10.00  and END, on reaching G
          -10.00  and END, on entering H
-          -0.02  every step                       <- time cost
+          -0.01  every step                       <- time cost
           -0.05  extra, if the step was blocked    <- do not scrape the walls
           +0.10 * (previous Manhattan distance - current)   <- progress shaping
 
@@ -106,11 +106,11 @@ THE PROBLEM, STATED AS AN MDP
          PROFITABLE shortcut and the robot learns to take it. The failure looks
          like a stupid agent and is really an arithmetic bug in the reward.
 
-    gamma  DISCOUNT ............ 0.995, because episodes run to 256 steps.
+    gamma  DISCOUNT ............ 0.995, because episodes run to 512 steps.
 
     terminated = reached G (success) or entered H (failure) -- the task itself
                  ended.
-    truncated  = the 256-step budget ran out -- an external limit ended it, the
+    truncated  = the 512-step budget ran out -- an external limit ended it, the
                  task did not. They are reported separately because the value of
                  the last state is 0 for the first case and NOT 0 for the second.
 
@@ -133,9 +133,31 @@ THE ALGORITHM
     "goal 10 cells away", then 15, then 40. The user's clicked goal is never
     trained on directly -- it has to generalise, which is the whole point.
 
+HOW THE GUI IS MEANT TO BE USED
+    It trains ITSELF the moment you launch it, in two phases:
+
+      (1) TRAINING -- the robot practises on curriculum goals you never chose,
+          and the canvas replays those practice episodes. The banner shows the
+          progress. It stops on its own when 16 TEST DELIVERIES -- greedy runs
+          from S to random cells, i.e. the thing you are about to click -- clear
+          --target-success TWICE IN A ROW, or after --train-updates, whichever
+          comes first.
+          "Stop & use it" cuts it short at any time.
+
+          Note the banner shows TWO success numbers, and they disagree on
+          purpose. "practice" is the curriculum success rate, which passes 90%
+          by update ~120; "test deliveries" is the real task, and lags far
+          behind it. Stopping on the first would hand you a policy that looks
+          trained and then misses half the cells you click.
+
+      (2) READY -- training has stopped. CLICK ANY CELL and the trained policy
+          drives from S to it, scored live. Nothing is learned in this phase, so
+          what you are watching is the finished policy rather than one that is
+          quietly still improving. "Train more" goes back to phase 1.
+
 WHAT YOU SEE IN THE GUI
-    left   the map. Grey = wall, red = hazard, green = start, star = YOUR goal.
-           CLICK ANYWHERE to move the goal. An episode replays live on top.
+    left   the map. Grey = wall, red = hazard, green = start, red ring = goal.
+           An episode replays live on top.
     right  V(s) for your current goal over every cell of the map, plus arrows
            showing the action the policy would actually take -- the learned
            behaviour, drawn. Watch the route grow backwards from the goal.
@@ -149,7 +171,13 @@ from scipy.ndimage import maximum_filter
 # ---------------------------------------------------------------- world ------
 GRID = 128                 # the map is GRID x GRID cells
 START = (0, 0)             # S, the depot, top-left
-MAX_STEPS = 256            # truncation limit
+MAX_STEPS = 512            # truncation limit. NOT 256: the far corner of a
+                           # 128x128 map is 254 cells away, slipping inflates
+                           # any route by ~1.3x, so it needs ~330 steps. At 256
+                           # the far third of the map is unreachable BY
+                           # CONSTRUCTION, and "click anywhere and the robot
+                           # goes there" quietly stops being true. Use
+                           # --steps 256 for the exercise as literally stated.
 PATCH = 9                  # the robot sees a PATCH x PATCH window around itself
 PAD = PATCH // 2
 COARSE = 7                 # ...plus a second PATCH x PATCH window at 1/COARSE
@@ -164,7 +192,11 @@ OBS_DIM = 4 * PATCH * PATCH + 6 + N_ACT
 
 R_GOAL = 10.0              # reach G
 R_HAZARD = -10.0           # enter H
-R_STEP = -0.02             # every step
+R_STEP = -0.01             # every step. Halved when the budget went from 256
+                           # to 512: the design rule is |R_STEP| < R_GOAL /
+                           # horizon (below which detouring still pays), and
+                           # doubling the horizon halves the bound to 10/512 =
+                           # 0.0195. 0.01 keeps the same ~2x margin as before.
 R_BLOCKED = -0.05          # extra, when the move was refused by a wall/edge
 R_PROGRESS = 0.10          # per cell of Manhattan progress
 GAMMA = 0.995
@@ -693,6 +725,35 @@ class Trainer:
                 "entropy": self.hist["entropy"][-1], "radius": self.radius,
                 "traj": last, "hist": self.hist}
 
+    def spot_check(self, n=16, rng=None):
+        """Greedy deliveries from S to random reachable goals. Fraction won.
+
+        This exists because the training success rate is NOT the thing the user
+        cares about. It is measured on curriculum goals -- a random start, a
+        goal sampled near it -- and it hits 0.9 long before the robot can cross
+        the map from the depot. Stopping training on it hands over a policy that
+        looks trained and then misses half the cells you click.
+
+        So the stopping criterion measures the actual task: start at S, go to a
+        cell chosen at random, greedily. It is still a noisy estimate -- which is
+        why the caller requires two consecutive passes -- but it is noisy about
+        the right quantity, and that beats a precise measurement of the wrong one.
+        """
+        rng = rng or np.random.RandomState(np.random.randint(1 << 30))
+        wins = 0
+        for _ in range(n):
+            for _ in range(50):                    # find a goal worth scoring
+                g_ = tuple(int(v) for v in self.random_goal_cell(rng))
+                if feasibility(self.env, g_, self.max_steps)["ok"]:
+                    break
+            _, _, _, tr = self.rollout(greedy=True, start=START, goal=g_,
+                                       max_steps=self.max_steps, record=False)
+            wins += tr["reason"] == "goal"
+        return wins / n
+
+    def random_goal_cell(self, rng):
+        return self.env.random_free_cell(rng)
+
     # -- evaluation ----------------------------------------------------------
     def evaluate(self, goal, n=20, start=START, greedy=True, max_steps=None):
         """Roll the current policy `n` times to a FIXED goal and count outcomes."""
@@ -813,9 +874,18 @@ def run_gui(args):
     # overwrites it. Reading env.goal to draw the star meant the star tracked
     # whatever random goal the trainer had just used, and the replayed episode
     # walked to that instead of to the cell you clicked.
-    state = {"run": False, "traj": None, "frame": 0, "quit": False,
-             "fps": args.fps, "throttle": args.throttle, "snap": None,
-             "vgrid": None, "field": None,
+    # The GUI has two phases and the whole layout follows from them:
+    #   "training"  -- the robot practises on curriculum goals you never see,
+    #                  and the canvas replays those practice episodes.
+    #   "ready"     -- training has stopped. You click a cell, and the trained
+    #                  policy drives to it. Nothing is learned in this phase, so
+    #                  what you see is the finished policy, not a policy that is
+    #                  quietly still improving while you watch.
+    state = {"run": False, "phase": "training", "traj": None, "frame": 0,
+             "quit": False, "fps": args.fps, "throttle": args.throttle,
+             "snap": None, "vgrid": None, "field": None, "pending": None,
+             "target": args.train_updates, "deliveries": [], "auto_stop": True,
+             "shown_phase": None, "last_check": 0, "spot": None, "passes": 0,
              "goal": (N - 1, N - 1) if not env.wall[N - 1, N - 1]
                      else env.random_free_cell()}
     watch_greedy = tk.BooleanVar(value=True)
@@ -832,6 +902,9 @@ def run_gui(args):
     # ---------------------------------------------------------------- layout
     top = tk.Frame(root, bg=BG); top.pack(side="top", fill="both", expand=True)
     left = tk.Frame(top, bg=BG); left.pack(side="left", padx=10, pady=10)
+    phase_lbl = tk.Label(left, text="", bg=BG, anchor="w", justify="left",
+                         font=("DejaVu Sans", 12, "bold"))
+    phase_lbl.pack(fill="x", pady=(0, 4))
     canvas = tk.Canvas(left, width=CW, height=CH, bg="#ffffff",
                        highlightthickness=1, highlightbackground="#c9c9d0")
     canvas.pack()
@@ -879,6 +952,11 @@ def run_gui(args):
 
     def draw_markers():
         canvas.delete("mark")
+        if state["phase"] == "training":
+            # During training the goal that matters is the episode's own
+            # curriculum goal, drawn per frame in draw_frame(). Showing the
+            # user's G as well just invites "why is it not going there?".
+            return
         x0, y0, x1, y1 = cell_box(START, 3)
         canvas.create_rectangle(x0, y0, x1, y1, outline="#2e9e2e", width=2,
                                 tags="mark")
@@ -898,6 +976,13 @@ def run_gui(args):
             return
         n = len(tr["path"])
         i = min(state["frame"], n - 1)
+        if state["phase"] == "training":
+            # this practice episode's own start and goal
+            sr, sc = tr["start"]
+            canvas.create_rectangle(*cell_box((sr, sc), 3), outline="#2e9e2e",
+                                    width=2, tags="dyn")
+            canvas.create_oval(*cell_box(tr["goal"], 5), outline="#d43d3d",
+                               width=2, tags="dyn")
         pts = []
         for (r, c) in tr["path"][:i + 1]:
             pts += [c * SC + SC / 2, r * SC + SC / 2]
@@ -915,11 +1000,43 @@ def run_gui(args):
         canvas.create_rectangle(0, 0, CW, 22, fill="#ffffff", outline="", tags="dyn")
         canvas.create_text(6, 11, anchor="w", tags="dyn",
                            font=("DejaVu Sans Mono", 10),
-                           fill={"DELIVERED": "#2e9e2e"}.get(txt, "#444"),
+                           fill={"DELIVERED": "#2e9e2e",
+                                 "DESTROYED (hazard)": "#d43d3d"}.get(txt, "#444"),
                            text=f"step {i}/{n - 1}   {txt}")
         canvas.create_text(CW - 6, 11, anchor="e", tags="dyn",
                            font=("DejaVu Sans Mono", 9), fill="#777",
-                           text="greedy policy" if tr.get("greedy") else "exploring (sampled)")
+                           text=("practice episode" if state["phase"] == "training"
+                                 else "trained policy, greedy"))
+
+    def refresh_phase():
+        t = trainer["t"]
+        if state["shown_phase"] != state["phase"]:
+            # The user's G is hidden during training (draw_markers returns
+            # early), so it has to be drawn the moment the phase flips --
+            # otherwise the ready phase starts with no visible goal.
+            state["shown_phase"] = state["phase"]
+            draw_markers()
+        if state["phase"] == "training":
+            pct = 100.0 * min(1.0, t.updates / max(1, state["target"]))
+            sr = (np.mean(t.hist["success"][-20:]) if t.hist["success"] else 0.0)
+            spot = ("" if state["spot"] is None
+                    else f"   test deliveries {state['spot']*100:.0f}%")
+            phase_lbl.config(
+                fg="#c46a1e",
+                text=f"① TRAINING — update {t.updates}/{state['target']} "
+                     f"({pct:.0f}%)   practice {sr*100:.0f}%   "
+                     f"reach {t.radius:.0f}/{2*env.n}{spot}"
+                     + ("   [paused]" if not state["run"] else ""))
+            btn.config(text="⏸  Pause" if state["run"]
+                       else ("▶  Train" if t.updates == 0 else "▶  Resume"))
+        else:
+            d = state["deliveries"][-20:]
+            tally = (f"   delivered {sum(d)}/{len(d)}" if d else "")
+            phase_lbl.config(
+                fg="#2e7d32",
+                text="② READY — click any cell and the trained policy will "
+                     "drive to it" + tally)
+            btn.config(text="＋ Train more")
 
     def refresh_goal_label():
         g_ = state["goal"]
@@ -943,11 +1060,63 @@ def run_gui(args):
         state["goal"] = (r, c)
         state["traj"] = None; state["frame"] = 0
         state["vgrid"] = None
-        draw_markers(); refresh_goal_label()
+        state["deliveries"] = []          # a new goal is a new scoreboard
+        draw_markers(); refresh_goal_label(); refresh_phase()
+        if state["phase"] == "ready":
+            # Redraw V(s) for the cell just clicked, so the heatmap and the
+            # arrows describe the journey about to be animated.
+            with lock:
+                ob, rr, ccx = obs_grid(env, (r, c), stride=2)
+                with torch.no_grad():
+                    v = trainer["t"].value(torch.from_numpy(ob)).numpy()
+                ob2, r2, c2 = obs_grid(env, (r, c), stride=max(4, N // 20))
+                with torch.no_grad():
+                    a2 = trainer["t"].policy.dist(
+                        torch.from_numpy(ob2)).probs.argmax(1).numpy()
+            m = (env.n + 1) // 2
+            grid = np.full((m, m), np.nan, np.float32)
+            grid[rr // 2, ccx // 2] = v
+            snap = dict(state["snap"] or {})
+            snap.update({"vgrid": grid, "stride": 2, "field": (r2, c2, a2),
+                         "hist": trainer["t"].hist})
+            state["snap"] = snap
+            redraw_plots(snap)
 
     canvas.bind("<Button-1>", on_click)
 
     # -------------------------------------------------------------- worker ---
+    def training_finished(t):
+        """Stop when the robot is competent, or when the budget runs out.
+
+        Competence, not a step count, because how long this takes depends on the
+        map: the curriculum has to reach the far end of the grid AND hold a high
+        success rate there. A fixed number of updates either stops early on a
+        hard map or wastes minutes on an easy one.
+        """
+        if t.updates >= state["target"]:
+            return True
+        if not state["auto_stop"]:
+            # "Train more" asked for a specific number of extra updates. Letting
+            # the competence check fire here would end it after one update,
+            # since the policy is by definition already competent.
+            return False
+        if t.radius < 2.0 * env.n - 1e-6:
+            return False                          # curriculum still expanding
+        if t.updates - state["last_check"] < 25:
+            return False                          # spot-check at most every 25
+        state["last_check"] = t.updates
+        state["spot"] = t.spot_check(16)
+        # Require TWO consecutive passes. With a single 8-episode check the rule
+        # fired at update 117 on a policy that then delivered 3/6 to a
+        # 165-step goal: 7-of-8 happens by luck often enough when the true rate
+        # is ~0.7. Sixteen episodes twice in a row is a much harder coincidence,
+        # and costs about two seconds.
+        if state["spot"] >= args.target_success:
+            state["passes"] += 1
+        else:
+            state["passes"] = 0
+        return state["passes"] >= 2
+
     def worker():
         while not state["quit"]:
             if not state["run"]:
@@ -956,11 +1125,17 @@ def run_gui(args):
                 # With the curriculum ablated, training targets the clicked cell.
                 trainer["t"].fixed_goal = state["goal"]
                 snap = trainer["t"].update()
+                done = training_finished(trainer["t"])
             goal = state["goal"]
+            snap["done"] = done
+            # The heatmap is a 4096-row forward pass. Doing it every update
+            # roughly halves the training rate for a picture that barely changes
+            # between consecutive updates, so during training it runs every 5th.
+            heavy = done or snap["update"] % 5 == 0
             # V(s) and the policy field are drawn for the CURRENT goal, so they
             # change the instant you click somewhere else -- that is the whole
             # point of a goal-conditioned value function, made visible.
-            if show_heat.get():
+            if show_heat.get() and heavy:
                 stride = 2
                 with lock:
                     ob, rr, ccx = obs_grid(env, goal, stride=stride)
@@ -975,13 +1150,17 @@ def run_gui(args):
                 grid[rr // stride, ccx // stride] = v
                 snap["vgrid"] = grid
                 snap["stride"] = stride
-            if show_arrows.get():
+            if show_arrows.get() and heavy:
                 with lock:
                     ob, rr, ccx = obs_grid(env, goal, stride=max(4, N // 20))
                     with torch.no_grad():
                         a = trainer["t"].policy.dist(torch.from_numpy(ob)).probs.argmax(1).numpy()
                 snap["field"] = (rr, ccx, a)
             q.put(snap)
+            if done:
+                state["run"] = False
+                state["phase"] = "ready"
+                state["traj"] = None
             time.sleep(state["throttle"] / 1000.0)
 
     wthread = threading.Thread(target=worker, daemon=True)
@@ -1036,6 +1215,7 @@ def run_gui(args):
                 break
         if got is not None:
             state["snap"] = got
+            state["pending"] = got.get("traj")
             redraw_plots(got)
             stat.config(text=(
                 f"update {got['update']:>5}   episodes {got['episodes']:>7}\n"
@@ -1043,23 +1223,34 @@ def run_gui(args):
                 f"   mean return {got['ret']:>7.2f}\n"
                 f"avg steps {got['steps']:>6.1f}   entropy {got['entropy']:>5.3f}"
                 f"   radius {got['radius']:>5.0f}"))
+        refresh_phase()
         if not state["quit"]:
             root.after(80, poll)
 
     HOLD = 25                       # frames to linger on the final frame
 
     def next_trajectory():
-        """Always roll toward the USER's goal, from S -- the task as posed.
+        """What to animate next, which depends entirely on the phase.
 
-        Training meanwhile runs on curriculum goals the user never sees, so this
-        replay is a genuine generalisation test, not a rehearsal.
+        While TRAINING: replay a practice episode the trainer just ran. Rolling
+        a fresh episode here instead would compete with the trainer for the lock
+        and slow the very thing you are waiting for.
+
+        When READY: roll the trained policy from S to YOUR goal. The policy was
+        never trained on that goal, so this is a generalisation test, not a
+        rehearsal -- and nothing is learned from it.
         """
+        if state["phase"] == "training":
+            tr, state["pending"] = state["pending"], None
+            return tr
         g_ = state["goal"]
         if env.wall[g_]:
             return None
         with lock:
-            return trainer["t"].rollout(greedy=watch_greedy.get(), start=START,
-                                        goal=g_, max_steps=args.steps)[3]
+            tr = trainer["t"].rollout(greedy=watch_greedy.get(), start=START,
+                                      goal=g_, max_steps=args.steps)[3]
+        state["deliveries"].append(tr["reason"] == "goal")
+        return tr
 
     def animate():
         if state["traj"] is None:
@@ -1074,8 +1265,16 @@ def run_gui(args):
 
     # ------------------------------------------------------------ controls ---
     def toggle():
-        state["run"] = not state["run"]
-        btn.config(text="⏸  Pause" if state["run"] else "▶  Train")
+        """Pause/resume while training; add another block of updates when ready."""
+        if state["phase"] == "ready":
+            state["target"] = trainer["t"].updates + args.more_updates
+            state["phase"] = "training"
+            state["auto_stop"] = False
+            state["traj"] = None
+            state["run"] = True
+        else:
+            state["run"] = not state["run"]
+        refresh_phase()
 
     def reset_map():
         state["run"] = False; btn.config(text="▶  Train")
@@ -1091,20 +1290,36 @@ def run_gui(args):
             env.__dict__.update(new.__dict__)
         state["goal"] = tuple(int(v) for v in env.random_free_cell())
         state["traj"] = None; state["frame"] = 0; state["snap"] = None
+        state["phase"] = "training"; state["target"] = args.train_updates
+        state["auto_stop"] = True; state["shown_phase"] = None
+        state["last_check"] = 0; state["spot"] = None; state["passes"] = 0
+        state["deliveries"] = []; state["pending"] = None
         for a_ in (ax1, ax2, ax3, ax4):
             a_.clear()
         axv.clear(); cv.draw_idle(); cc.draw_idle()
         draw_static(); draw_markers(); refresh_goal_label()
-        stat.config(text="new map, fresh weights — press Train")
+        stat.config(text="new map, fresh weights — training from scratch")
+        state["run"] = True
+        refresh_phase()
 
     def random_goal():
         state["goal"] = tuple(int(v) for v in env.random_free_cell())
         state["traj"] = None; state["frame"] = 0; state["vgrid"] = None
-        draw_markers(); refresh_goal_label()
+        state["deliveries"] = []
+        draw_markers(); refresh_goal_label(); refresh_phase()
+
+    def skip_training():
+        """Stop training now and go straight to click-to-deliver."""
+        state["run"] = False
+        state["phase"] = "ready"
+        state["traj"] = None; state["frame"] = 0
+        draw_markers(); refresh_phase()
 
     btn = tk.Button(ctl, text="▶  Train", command=toggle, width=11,
                     font=("DejaVu Sans", 11, "bold"))
     btn.pack(side="left", padx=8)
+    tk.Button(ctl, text="Stop & use it", command=skip_training,
+              font=("DejaVu Sans", 10)).pack(side="left", padx=4)
     tk.Button(ctl, text="Random goal", command=random_goal,
               font=("DejaVu Sans", 10)).pack(side="left", padx=4)
     tk.Button(ctl, text="New map (fresh weights)", command=reset_map,
@@ -1139,10 +1354,22 @@ def run_gui(args):
         root.after(50, finish)
 
     root.protocol("WM_DELETE_WINDOW", on_close)
-    draw_static(); draw_markers(); refresh_goal_label(); poll(); animate()
-    stat.config(text="click the map to place G, then press  ▶ Train")
-    if args.autostart:
-        toggle()
+    draw_static(); draw_markers(); refresh_goal_label()
+    # Training starts by itself. There is nothing useful to click at before a
+    # policy exists, so making you press a button first was busywork.
+    state["run"] = not args.no_autostart
+    refresh_phase(); poll(); animate()
+    stat.config(text="training from scratch — the map you see is being practised on")
+    if args.demo_click:
+        # Used by the automated GUI check: fire a synthetic click at a cell once
+        # training has had a moment, so the ready-phase path gets exercised
+        # without a mouse.
+        dr, dc = (int(v) for v in args.demo_click.split(","))
+
+        def fake_click():
+            canvas.event_generate("<Button-1>", x=int(dc * SC + SC / 2),
+                                  y=int(dr * SC + SC / 2))
+        root.after(int(args.demo_click_after * 1000), fake_click)
     if args.screenshot_after:
         root.after(int(args.screenshot_after * 1000), on_close)
     root.mainloop()
@@ -1176,7 +1403,25 @@ if __name__ == "__main__":
     ap.add_argument("--no-curriculum", action="store_true",
                     help="ablate the curriculum: train on the far goal from the "
                          "start. Run it and watch nothing happen.")
-    ap.add_argument("--autostart", action="store_true")
-    ap.add_argument("--screenshot-after", type=float, default=0)
+    ap.add_argument("--train-updates", type=int, default=800,
+                    help="GUI: updates to train before switching to "
+                         "click-to-deliver. It stops earlier if it gets good "
+                         "(see --target-success)")
+    ap.add_argument("--target-success", type=float, default=0.85,
+                    help="GUI: stop training early once this fraction of 16 test "
+                         "deliveries -- from S to random cells, the thing you "
+                         "will actually click -- succeeds, twice in a row")
+    ap.add_argument("--more-updates", type=int, default=200,
+                    help="GUI: how many updates the 'Train more' button adds")
+    ap.add_argument("--no-autostart", action="store_true",
+                    help="GUI: wait for the button instead of training on launch")
+    ap.add_argument("--autostart", action="store_true",
+                    help="accepted for symmetry; training now autostarts anyway")
+    ap.add_argument("--screenshot-after", type=float, default=0,
+                    help="close the window after N seconds (automated checks)")
+    ap.add_argument("--demo-click", type=str, default=None,
+                    help="fire a synthetic click at row,col (automated checks)")
+    ap.add_argument("--demo-click-after", type=float, default=20.0,
+                    help="when to fire --demo-click, in seconds")
     a = ap.parse_args()
     run_headless(a) if a.headless else run_gui(a)
