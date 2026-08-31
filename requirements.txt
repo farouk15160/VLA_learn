@@ -1,0 +1,9 @@
+# Install with:  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Tkinter is not here — it ships with Python (on Debian/Ubuntu: apt install python3-tk).
+torch>=2.0          # the CUDA build is the default wheel on Linux x86_64
+gymnasium>=1.0      # not used at runtime, but the RL file follows its env API
+scikit-learn>=1.3
+scipy>=1.10         # reads the SVHN .mat file
+matplotlib>=3.7
+pillow>=10.0
+numpy>=1.24

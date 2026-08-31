@@ -1,0 +1,19 @@
+# virtualenv — 5 GB, never commit
+.venv/
+venv/
+env/
+
+# the SVHN dataset (62 MB) — supervised_learning.py downloads it on first run
+data/*.mat
+data/*.part
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# generated
+outputs/
+*.png
+*.pt
+*.json
