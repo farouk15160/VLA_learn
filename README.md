@@ -1,6 +1,7 @@
 # VLA_learn — the things every VLA paper assumes you already know
 
-Three runnable programs, each a single file, each with a GUI you can watch learn.
+Four runnable programs, each with a GUI you can watch learn — and the last one
+drives a car in Gazebo through ROS 2.
 
 ```
 VLA_learn/
@@ -8,6 +9,12 @@ VLA_learn/
 ├── reinforcement_learning.py    RL: a car learns to drive from A to B
 ├── grid_delivery_robot.py       RL: a robot delivers to a goal YOU click, on a
 │                                    128x128 stochastic grid
+├── behavioral_cloning/          BC: clone a human driver, then drive a Gazebo
+│                                    car with the result, through ROS 2
+│   ├── train.py                     dataset, NVIDIA CNN, live dashboard
+│   ├── drive_node.py                the policy as a ROS 2 node
+│   ├── collect.py / evaluate.py     a Gazebo expert, and lane-keeping scores
+│   └── README.md                    the full write-up for that project
 ├── docs/
 │   ├── supervised_learning.md   the data spec, the model, and the 8 ways SL lies to you
 │   ├── reinforcement_learning.md  RL from zero: the MDP, policy gradients, baselines
@@ -48,6 +55,13 @@ downloads it into `data/` on first run.
 
 # Grid delivery — trains itself on launch, then you click where it should go
 .venv/bin/python grid_delivery_robot.py
+
+# Behavioral cloning — clone a human driver (needs --fetch once, 498 MB)
+.venv/bin/python -m behavioral_cloning.train --fetch
+.venv/bin/python -m behavioral_cloning.train
+
+# ...then let the clone drive a car in Gazebo, headless
+./behavioral_cloning/run_demo.sh all
 ```
 
 Press **▶ Train** in the first two windows — nothing trains until you do.
@@ -177,6 +191,70 @@ The doc also carries **Exercise 2** — the UR5e pick-and-place design: privileg
 state vs. deployable observation, why the action is relative TCP and not joint
 velocities, the seven reward terms with coefficients, and three ways the robot
 can farm that reward without ever doing the task.
+
+### `behavioral_cloning.py` — copying a driver, and watching the copy break
+
+The first three files argue that **behavior cloning *is* supervised learning**
+and that it fails by **covariate shift**. This one makes both claims executable,
+and then drives a real robot stack with the result.
+
+Built on [seraj94ai's behavioral-cloning
+project](https://github.com/seraj94ai/A-self-driving-car-using-behavioral-cloning)
+and NVIDIA's *End to End Learning for Self-Driving Cars* (Bojarski et al. 2016).
+That repo has **no licence file**, so none of its code is copied here — this is
+an independent PyTorch implementation and `--fetch` clones their repository
+locally for the recordings. It also could not run as-is: it is Keras 1.x, and
+its `driving_log.csv` stores Windows paths that `os.path.basename` cannot split
+on Linux. Both fixed; the 252,219-parameter count from NVIDIA's table is
+asserted by a test.
+
+**The statistic that decides the whole problem:** 78.1% of the recorded steering
+angles are *exactly zero*. Train on that and MSE is minimised by predicting ~0
+forever — a great validation loss, and a car that drives into the first corner.
+Capping each steering bin is worth more than any architectural choice in the
+file.
+
+**On the original data** (30 epochs, CPU, 273 s): validation MSE **0.0837** vs
+0.1756 for predicting the mean, steering correlation **0.657**.
+
+**Then it drives.** `ros2_bc_driver.py` turns the network into a ROS 2 node —
+`sensor_msgs/Image` in, `geometry_msgs/Twist` out — and `gazebo/` provides a
+figure-eight track (an oval would let a constant steering angle "win"), a
+pure-pursuit expert with privileged ground truth, and an evaluator that scores
+lane-keeping in metres. Cloning 3,428 expert frames, then driving at 0.9 m/s on
+a 3 m lane:
+
+| policy | mean cross-track error | left the road? |
+|---|---|---|
+| null baseline — ignores the camera | 36.5 m | **after 5.5 s** |
+| the expert (privileged ground truth) | 0.075 m | no |
+| **the clone (camera only)** | **0.117 m** | no |
+| the same net trained on **Udacity** data | 0.49 m | no |
+
+**The clone drives, within 1.6× of its teacher** — and the null baseline is what
+makes that claim mean anything: a car that ignores the camera leaves this track
+in five and a half seconds.
+
+Training opens a **live dashboard** that updates on every weight update: the
+camera frame *and* the 66×200 tensor the network actually sees, the human's
+action against the model's, per-batch loss with the gradient norm beside it, and
+a timestamped event log. Its README also covers what else could drive this car —
+DAgger, inverse RL, GAIL, why RL is not used on real roads, and how production
+self-driving stacks are actually built.
+
+The doc is equally clear about what did **not** happen: the compounding-error
+failure covariate shift predicts never materialised, because the lane is wide,
+the expert is slow and smooth, and six laps cover the states densely. Saying so
+is more useful than claiming a failure that was not observed. The last row is
+**domain shift**, and it is the interesting one — a policy trained on a
+photoreal canyon road still keeps the Gazebo car between the lines while being
+four times worse, which is exactly the "works, but wrong" outcome that makes
+sim-to-real dangerous.
+
+`behavioral_cloning/README.md` keeps **six bugs** on the record, including wheels
+that spun about a vertical axis (an SDF joint axis is expressed in the child
+link's frame) and an evaluator that silently ignored `--model` and scored the
+same checkpoint four times — which nearly published a wrong headline.
 
 ---
 
