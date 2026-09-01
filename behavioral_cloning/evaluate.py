@@ -123,7 +123,18 @@ def main():
     finally:
         driver.stop()
 
-    e = np.array(mon.err) if mon.err else np.array([float("nan")])
+    # A run that received no camera frames is not a result, it is a broken
+    # simulator -- and printing "stayed on the road" for a car that never moved
+    # is the worst possible failure mode for a measurement tool.
+    if driver.n == 0 or not mon.err:
+        driver.destroy_node(); mon.destroy_node(); rclpy.try_shutdown()
+        raise SystemExit(
+            f"NO DATA: {driver.n} camera frames and {len(mon.err)} odometry "
+            f"samples received. The simulator is not publishing — check that "
+            f"gzserver is running and that no second one is competing for the "
+            f"same topics.")
+
+    e = np.array(mon.err)
     print(f"\nframes processed      {driver.n}")
     print(f"distance driven       {mon.dist:.1f} m  ({mon.dist/lap:.2f} laps)")
     print(f"cross-track error     mean {e.mean():.3f} m   max {e.max():.3f} m")

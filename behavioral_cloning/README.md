@@ -488,5 +488,17 @@ Sources: [Bojarski et al., *End to End Learning for Self-Driving Cars*
 ./behavioral_cloning/run_demo.sh all
 ```
 
+```bash
+./behavioral_cloning/run_demo.sh stop     # kill a leftover simulator
+```
+
 Requires ROS 2 Humble and Gazebo 11 for the simulation parts; the trainer and
 its dashboard need neither.
+
+**One operational wrinkle worth knowing.** `gzserver` does not reliably die with
+the script that started it — it is a wrapper that execs the real server, and the
+survivor is reparented to init. A leftover simulator publishes to the same
+topics as the next one, and two of them together produce measurements that look
+plausible and are meaningless (§8, bug 6). So `run_demo.sh` **refuses to start**
+when one is already running, and `run_demo.sh stop` clears it. If a driving
+score ever looks strange, check `pgrep -x gzserver` first.
