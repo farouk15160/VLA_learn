@@ -7,19 +7,10 @@ env/
 data/*.mat
 data/*.part
 
-# the Udacity driving recordings (498 MB) — behavioral_cloning.py --fetch
-# clones them from seraj94ai's repo. Never committed here: too large, and
-# that repository carries no licence.
+# leftover driving datasets from a removed project — never commit these
 data/udacity_sim/
-
-# demonstrations recorded in Gazebo (~28 MB) — regenerate with
-#   ./behavioral_cloning/run_demo.sh collect
 data/gazebo_track/
 
-# the generated world: gazebo/make_track.py rebuilds it, and it is 320 KB of
-# machine-written XML that would churn on every parameter change
-behavioral_cloning/track.world
-behavioral_cloning/centreline.csv
 
 # python
 __pycache__/
