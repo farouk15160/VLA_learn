@@ -1,0 +1,27 @@
+.venv/
+build/
+install/
+log/
+!outputs/
+outputs/*
+!outputs/README.md
+!outputs/evaluation-seed-7-20260902.json
+!outputs/evaluation-seed-7-v2-20260902.json
+!outputs/evaluation-seed-17-v2-20260902.json
+!outputs/ppo-seed-7-v2/
+outputs/ppo-seed-7-v2/*
+!outputs/ppo-seed-7-v2/best.pt
+!outputs/ppo-seed-17-v2/
+outputs/ppo-seed-17-v2/*
+!outputs/ppo-seed-17-v2/best.pt
+__pycache__/
+*.pyc
+.coverage
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# The repository's root ignore excludes every JSON/PT file. These are required
+# runtime configuration and the two measured reproducibility checkpoints.
+!config/
+!config/default.json

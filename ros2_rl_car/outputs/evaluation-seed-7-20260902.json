@@ -1,0 +1,122 @@
+[
+  {
+    "policy": "null_constant_left",
+    "seed": 100,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.37624914065350623,
+    "max_cross_track_error": 1.0225319206577246,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 409,
+    "direction_accuracy": 0.14705882352941177
+  },
+  {
+    "policy": "null_constant_straight",
+    "seed": 100,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.3593010959208808,
+    "max_cross_track_error": 1.0422540230093058,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 892,
+    "direction_accuracy": 0.0
+  },
+  {
+    "policy": "null_constant_right",
+    "seed": 100,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.3966925635708936,
+    "max_cross_track_error": 1.0257147705551064,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 403,
+    "direction_accuracy": 0.0
+  },
+  {
+    "policy": "pure_pursuit_ground_truth",
+    "seed": 100,
+    "episodes": 10,
+    "success_rate": 1.0,
+    "mean_cross_track_error": 0.06704247718612179,
+    "max_cross_track_error": 0.17361606476282027,
+    "laps_completed": 10,
+    "collision_rate": 0.0,
+    "sensor_frames": 17557,
+    "direction_accuracy": 1.0
+  },
+  {
+    "policy": "ppo_greedy",
+    "seed": 100,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.35832968168262697,
+    "max_cross_track_error": 1.0433019117942945,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 980,
+    "direction_accuracy": 0.010344827586206896
+  },
+  {
+    "policy": "null_constant_left",
+    "seed": 101,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.3937028472503377,
+    "max_cross_track_error": 1.0216980399578683,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 404,
+    "direction_accuracy": 0.10294117647058823
+  },
+  {
+    "policy": "null_constant_straight",
+    "seed": 101,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.36678333976863603,
+    "max_cross_track_error": 1.0444837310885677,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 891,
+    "direction_accuracy": 0.0
+  },
+  {
+    "policy": "null_constant_right",
+    "seed": 101,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.40585808336751,
+    "max_cross_track_error": 1.032749736153067,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 395,
+    "direction_accuracy": 0.0
+  },
+  {
+    "policy": "pure_pursuit_ground_truth",
+    "seed": 101,
+    "episodes": 10,
+    "success_rate": 0.7,
+    "mean_cross_track_error": 0.06610011376807165,
+    "max_cross_track_error": 0.16842844222989592,
+    "laps_completed": 7,
+    "collision_rate": 0.3,
+    "sensor_frames": 15873,
+    "direction_accuracy": 1.0
+  },
+  {
+    "policy": "ppo_greedy",
+    "seed": 101,
+    "episodes": 10,
+    "success_rate": 0.0,
+    "mean_cross_track_error": 0.3719848302329025,
+    "max_cross_track_error": 1.0459297445013864,
+    "laps_completed": 0,
+    "collision_rate": 1.0,
+    "sensor_frames": 957,
+    "direction_accuracy": 0.0
+  }
+]

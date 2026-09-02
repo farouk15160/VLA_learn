@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -x "${PROJECT_DIR}/.venv/bin/python" ]]; then
+  PYTHON="${PROJECT_DIR}/.venv/bin/python"
+elif [[ -x "${PROJECT_DIR}/../.venv/bin/python" ]]; then
+  PYTHON="${PROJECT_DIR}/../.venv/bin/python"
+else
+  echo "No Python 3.10 virtualenv found; run scripts/setup_venv.sh" >&2
+  exit 2
+fi
+
+# ROS setup scripts read unset variables, so this wrapper intentionally never uses set -u.
+source /opt/ros/humble/setup.bash
+export PYTHONPATH="/opt/ros/humble/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages:${PROJECT_DIR}:${PYTHONPATH:-}"
+export ROS_LOG_DIR="${PROJECT_DIR}/outputs/ros-logs"
+export MPLCONFIGDIR="${PROJECT_DIR}/outputs/matplotlib"
+mkdir -p "${ROS_LOG_DIR}" "${MPLCONFIGDIR}"
+exec "${PYTHON}" -m ros2_rl_car.cli "$@"
