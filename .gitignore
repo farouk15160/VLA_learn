@@ -3,13 +3,8 @@
 venv/
 env/
 
-# the SVHN dataset (62 MB) — supervised_learning.py downloads it on first run
-data/*.mat
-data/*.part
-
-# leftover driving datasets from a removed project — never commit these
-data/udacity_sim/
-data/gazebo_track/
+# Downloaded/reproducible datasets
+data/
 
 
 # python
@@ -22,3 +17,6 @@ outputs/
 *.png
 *.pt
 *.json
+
+# Independent nested repository kept at the requested root location
+vla-arm-sim/
