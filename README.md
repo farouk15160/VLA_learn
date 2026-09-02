@@ -46,11 +46,15 @@ cd ros2_rl_car
 See each section README for its full commands, algorithms, mathematics, and
 measured results.
 
-## Live verification
+## Verification
 
-The automated test sources were removed as requested after the reorganized
-suite passed all 72 checks. Verify the driving integration with the real
-headless simulator:
+Run the automated regression suite from the repository root:
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+Verify the driving integration with the real headless simulator:
 
 ```bash
 cd ros2_rl_car

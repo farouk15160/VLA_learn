@@ -169,9 +169,23 @@ WHAT YOU SEE IN THE GUI
     bottom success rate, mean return, policy entropy, curriculum radius.
 """
 import numpy as np
-import torch
-import torch.nn as nn
 from scipy.ndimage import maximum_filter
+
+try:
+    import torch
+    import torch.nn as nn
+except ModuleNotFoundError:
+    torch = None
+    nn = None
+
+
+def require_torch():
+    if torch is None or nn is None:
+        raise ModuleNotFoundError(
+            "PyTorch is required for grid-delivery training. "
+            "Install the project dependencies with: "
+            "python3 -m pip install -r requirements.txt"
+        )
 
 # ---------------------------------------------------------------- world ------
 GRID = 128                 # the map is GRID x GRID cells
@@ -464,29 +478,39 @@ def feasibility(env, goal, max_steps=MAX_STEPS, start=START):
 
 
 # ---------------------------------------------------------------- nets -------
-class Policy(nn.Module):
-    def __init__(self, obs=OBS_DIM, hid=256, act=N_ACT):
-        super().__init__()
-        self.net = nn.Sequential(nn.Linear(obs, hid), nn.Tanh(),
-                                 nn.Linear(hid, hid), nn.Tanh(),
-                                 nn.Linear(hid, act))
+if nn is not None:
+    class Policy(nn.Module):
+        def __init__(self, obs=OBS_DIM, hid=256, act=N_ACT):
+            super().__init__()
+            self.net = nn.Sequential(nn.Linear(obs, hid), nn.Tanh(),
+                                     nn.Linear(hid, hid), nn.Tanh(),
+                                     nn.Linear(hid, act))
 
-    def forward(self, x):
-        return self.net(x)
+        def forward(self, x):
+            return self.net(x)
 
-    def dist(self, x):
-        return torch.distributions.Categorical(logits=self.net(x))
+        def dist(self, x):
+            return torch.distributions.Categorical(logits=self.net(x))
 
 
-class ValueNet(nn.Module):
-    def __init__(self, obs=OBS_DIM, hid=256):
-        super().__init__()
-        self.net = nn.Sequential(nn.Linear(obs, hid), nn.Tanh(),
-                                 nn.Linear(hid, hid), nn.Tanh(),
-                                 nn.Linear(hid, 1))
+    class ValueNet(nn.Module):
+        def __init__(self, obs=OBS_DIM, hid=256):
+            super().__init__()
+            self.net = nn.Sequential(nn.Linear(obs, hid), nn.Tanh(),
+                                     nn.Linear(hid, hid), nn.Tanh(),
+                                     nn.Linear(hid, 1))
 
-    def forward(self, x):
-        return self.net(x).squeeze(-1)
+        def forward(self, x):
+            return self.net(x).squeeze(-1)
+else:
+    class Policy:
+        def __init__(self, *args, **kwargs):
+            require_torch()
+
+
+    class ValueNet:
+        def __init__(self, *args, **kwargs):
+            require_torch()
 
 
 def gae(rew, vals, last_val, gamma, lam):
@@ -575,6 +599,7 @@ class Trainer:
     def __init__(self, env=None, seed=0, gamma=GAMMA, lr=5e-4, batch_eps=16,
                  hid=256, use_baseline=True, ent_coef=0.03, curriculum=True,
                  max_steps=MAX_STEPS, lam=0.95):
+        require_torch()
         torch.manual_seed(seed)
         np.random.seed(seed)
         self.policy = Policy(hid=hid)
